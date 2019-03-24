@@ -60,9 +60,20 @@ function formatContent (source, isSFC) {
             template: res.template.content
                 .replace(/{{/g, '{')
                 .replace(/}}/g, '}'),
-            js: res.script.content.replace(/\/\//g, '')
+            js: res.script.content.replace(/\/\//g, ''),
+            styles: res.styles[0].content
+                .replace(/\n+@/g, '')
+                .replace(
+                    `import '@/styles/mixin.sass'`,
+                    `@import '../../styles/mixin.sass'`
+                )
+                .replace(/size-dpr/g, 'dpr')
+                .replace(/Horizontal/g, 'horizontal')
+                .replace(/Vertical/g, 'vertical')
+                .replace(/font-size/g, 'font')
         };
     } else {
+        console.log('------------');
         return {
             template: null,
             js: source
@@ -165,6 +176,7 @@ module.exports = function transform (src, targetPath, isSFC) {
                                 const node = path.node;
                                 const componentName =
                                     state.components[node.name] ||
+                                    // eslint-disable-next-line standard/computed-property-even-spacing
                                     state.components[
                                         parseComponentName(node.name)
                                     ];
@@ -188,5 +200,9 @@ module.exports = function transform (src, targetPath, isSFC) {
     });
 
     output(code, targetPath);
+    fs.writeFileSync(
+        path.resolve(__dirname, '../index.sass'),
+        component.styles
+    );
     log('Transform successed!!!', 'success');
 };
