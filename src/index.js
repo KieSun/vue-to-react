@@ -5,15 +5,24 @@ const babelTraverse = require('babel-traverse').default;
 const generate = require('babel-generator').default;
 const t = require('babel-types');
 const compiler = require('vue-template-compiler');
+var pug = require('pug');
 
-const { initProps, initData, initComputed, initComponents } = require('./collect-state');
+const {
+    initProps,
+    initData,
+    initComputed,
+    initComponents
+} = require('./collect-state');
 const { parseName, log, parseComponentName } = require('./utils');
-const { 
-    genImports, genConstructor,
-    genStaticProps, genClassMethods
+const {
+    genImports,
+    genConstructor,
+    genStaticProps,
+    genClassMethods
 } = require('./react-ast-helpers');
-const { 
-    collectVueProps, handleCycleMethods, 
+const {
+    collectVueProps,
+    handleCycleMethods,
     handleGeneralMethods
 } = require('./vue-ast-helpers');
 const { genSFCRenderMethod } = require('./sfc/sfc-ast-helpers');
@@ -31,15 +40,15 @@ const state = {
 
 // Life-cycle methods relations mapping
 const cycle = {
-    'created': 'componentWillMount',
-    'mounted': 'componentDidMount',
-    'updated': 'componentDidUpdate',
-    'beforeDestroy': 'componentWillUnmount',
-    'errorCaptured': 'componentDidCatch',
-    'render': 'render'
+    created: 'componentWillMount',
+    mounted: 'componentDidMount',
+    updated: 'componentDidUpdate',
+    beforeDestroy: 'componentWillUnmount',
+    errorCaptured: 'componentDidCatch',
+    render: 'render'
 };
 
-const collect = { 
+const collect = {
     imports: [],
     classMethods: {}
 };
@@ -48,7 +57,9 @@ function formatContent (source, isSFC) {
     if (isSFC) {
         const res = compiler.parseComponent(source, { pad: 'line' });
         return {
-            template: res.template.content.replace(/{{/g, '{').replace(/}}/g, '}'),
+            template: res.template.content
+                .replace(/{{/g, '{')
+                .replace(/}}/g, '}'),
             js: res.script.content.replace(/\/\//g, '')
         };
     } else {
@@ -64,6 +75,15 @@ module.exports = function transform (src, targetPath, isSFC) {
     const source = fs.readFileSync(src);
     const component = formatContent(source.toString(), isSFC);
 
+    component.template = component.template
+        .replace(/:/g, 'v-bind:')
+        .replace(/@/g, 'v-on:');
+
+    if (source.toString().includes(`<template lang='pug'>`)) {
+        var fn = pug.compile(component.template);
+        component.template = fn();
+    }
+
     const vast = babylon.parse(component.js, {
         sourceType: 'module',
         plugins: isSFC ? [] : ['jsx']
@@ -78,13 +98,23 @@ module.exports = function transform (src, targetPath, isSFC) {
         ImportDeclaration (path) {
             collect.imports.push(path.node);
         },
-    
+
         ObjectMethod (path) {
             const name = path.node.key.name;
-            if (path.parentPath.parent.key && path.parentPath.parent.key.name === 'methods') {
+            if (
+                path.parentPath.parent.key &&
+                path.parentPath.parent.key.name === 'methods'
+            ) {
                 handleGeneralMethods(path, collect, state, name);
             } else if (cycle[name]) {
-                handleCycleMethods(path, collect, state, name, cycle[name], isSFC);
+                handleCycleMethods(
+                    path,
+                    collect,
+                    state,
+                    name,
+                    cycle[name],
+                    isSFC
+                );
             } else {
                 if (name === 'data' || state.computeds[name]) {
                     return;
@@ -99,18 +129,20 @@ module.exports = function transform (src, targetPath, isSFC) {
         // traverse template in sfc
         renderArgument = traverseTemplate(component.template, state);
     }
-    
+
     // AST for react component
-    const tpl = `export default class ${parseName(state.name)} extends Component {}`;
+    const tpl = `export default class ${parseName(
+        state.name
+    )} extends Component {}`;
     const rast = babylon.parse(tpl, {
         sourceType: 'module'
     });
-    
+
     babelTraverse(rast, {
         Program (path) {
             genImports(path, collect, state);
         },
-    
+
         ClassBody (path) {
             genConstructor(path, state);
             genStaticProps(path, state);
@@ -126,11 +158,20 @@ module.exports = function transform (src, targetPath, isSFC) {
                 if (path.node.key.name === 'render') {
                     path.traverse({
                         JSXIdentifier (path) {
-                            if (t.isJSXClosingElement(path.parent) || t.isJSXOpeningElement(path.parent)) {
+                            if (
+                                t.isJSXClosingElement(path.parent) ||
+                                t.isJSXOpeningElement(path.parent)
+                            ) {
                                 const node = path.node;
-                                const componentName = state.components[node.name] || state.components[parseComponentName(node.name)];
+                                const componentName =
+                                    state.components[node.name] ||
+                                    state.components[
+                                        parseComponentName(node.name)
+                                    ];
                                 if (componentName) {
-                                    path.replaceWith(t.jSXIdentifier(componentName));
+                                    path.replaceWith(
+                                        t.jSXIdentifier(componentName)
+                                    );
                                     path.stop();
                                 }
                             }
@@ -140,12 +181,12 @@ module.exports = function transform (src, targetPath, isSFC) {
             }
         });
     }
-    
+
     const { code } = generate(rast, {
         quotes: 'single',
         retainLines: true
     });
-    
+
     output(code, targetPath);
     log('Transform successed!!!', 'success');
 };
